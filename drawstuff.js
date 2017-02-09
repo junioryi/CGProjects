@@ -157,9 +157,49 @@ class Vector {
             return(new Vector(NaN,NaN,NaN));
         }
     } // end scale static method
+
+    // static cross method
+    static cross(u, v) {
+        try {
+            if (!(u instanceof Vector) || !(v instanceof Vector))
+                throw "Vector.cross: parameter not a vector.";
+            else {
+                var temp = new Vector(
+                        u.y*v.z - u.z*v.y,
+                        u.z*v.x - u.x*v.z,
+                        u.x*v.y - u.y*v.z);
+                return(Vector.normalize(temp));
+            }
+        } // end try
+        catch(e) {
+            console.log(e);
+            return(new Vector(NaN, NaN, NaN));
+        }
+    } // end cross static method
     
 } // end Vector class
 
+class Triangle {
+    constructor(json) {
+
+        // TODO:Maybe valid input here
+        
+        this.v0 = new Vector(json.v0[0], json.v0[1], json.v0[2]);
+        this.v1 = new Vector(json.v1[0], json.v1[1], json.v1[2]);
+        this.v2 = new Vector(json.v2[0], json.v2[1], json.v2[2]);
+
+        this.u = Vector.subtract(v1, v0);
+        this.v = Vector.subtract(v2, v0);
+
+        this.n = Vector.cross(u, v);
+
+        this.uu = Vector.dot(u, u);
+        this.vv = Vector.dot(v, v);
+        this.uv = Vector.dot(u, v);
+
+        this.uv_square = uv * uv;
+    }
+} // end Triangle class
 
 /* utility functions */
 
@@ -301,7 +341,51 @@ function raySphereIntersect(ray,sphere,clipVal) {
         return({"exists": false, "xyz": NaN, "t": NaN});
     }
 } // end raySphereIntersect
-    
+
+// Ray Triangle intersection
+function rayTriangleIntersect(ray, triangle, clipVal) {
+    try {
+        if (!(ray instanceof Array) || !(triangle instanceof Object))
+            throw "RayTriangleIntersect: ray or triangle are not formatted well.";
+        else if (ray.length != 2)
+            throw "RayTriangleIntersect: badly formatted ray.";
+        else { // valid params
+            // ray = [eye, Dir]
+            var w0 = Vector.subtract(ray[0], triangle.v0);
+            var a  = Vector.dot(triangle.n, w0);
+            var b  = Vector.dot(triangle.n, ray[1]);
+            var r  = a / b;
+            if (Math.abs(b) < 0.001) // ray is parallel to triangle.
+                throw "Ray is Parallel to triangle";
+            else if (r < 0.0) 
+                throw "Ray goes away.";
+            else {
+                // Test if point is inside triangle
+                var I = Vector.add(ray[0], Vector.scale(r, ray[1])); // Intersection point
+                var w = Vector.subtract(I, triangle.v0); 
+                var wu = Vector.dot(w, triangle.u);
+                var wv = Vector.dot(w, triangle.v);
+                var D = triangle.uv_square - triangle.uu * triangle.vv; // denominator
+
+                // Get and test parameters
+                var s = (triangle.uv * wv - triangle.vv * wu) / D;
+                if (s < 0.0 || s > 1.0) 
+                    throw "No intersection because s not satisfied";
+                var t = (triangle.uv * wu - triangle.uu * wv) / D;
+                if (t < 0.0 || (s + t) > 1.0) 
+                    throw "No intersection because t not satisfied";
+
+                // Return intersection point I
+                return({"exists": true, "xyz": I, "t":r});                
+            }
+        }
+    }
+    catch(e) {
+        console.log(e);
+        return({"exists":false, "xyz": NaN, "t":NaN});
+    }
+} // end ray triangle intersection
+
 // draw a pixel at x,y using color
 function drawPixel(imagedata,x,y,color) {
     try {
@@ -345,10 +429,30 @@ function drawRandPixels(context) {
     context.putImageData(imagedata, 0, 0);
 } // end draw random pixels
 
+// Draw region with color
+function drawRegion(context) {
+    
+} // end draw region
+
+// Draw triangles
+function drawTriangle(context) {
+    var inputTriangles = getJSONFile(INPUT_TRIANGLES_URL, "triangles");
+    if (inputTriangles != String.null) {
+        var x = 0; var y = 0;
+        var cs = 0; var cy = 0;
+        
+        var n = inputTriangles.length;
+        for (var t=0; t<n; t++) {
+
+            
+        }
+    } // end if no triangle found.
+} // end draw triangle
+
 // put random points in the spheres from the class github
 function drawRandPixelsInInputSpheres(context) {
     var inputSpheres = getJSONFile(INPUT_SPHERES_URL,"spheres");
-    var w = context.canvas.width;
+    var w = context.canvas.width; //512
     var h = context.canvas.height;
     var imagedata = context.createImageData(w,h);
     const PIXEL_DENSITY = 0.1;
@@ -365,6 +469,7 @@ function drawRandPixelsInInputSpheres(context) {
 
         // Loop over the spheres, draw rand pixels in each
         for (var s=0; s<n; s++) {
+            //console.log("s: "+s);
             cx = w*inputSpheres[s].x; // sphere center x
             cy = h*inputSpheres[s].y; // sphere center y
             sphereRadius = Math.round(w*inputSpheres[s].r); // radius
@@ -383,10 +488,13 @@ function drawRandPixelsInInputSpheres(context) {
                     x = Math.random()*2 - 1; // in unit square 
                     y = Math.random()*2 - 1; // in unit square
                 } while (Math.sqrt(x*x + y*y) > 1)
+                var tempx = cx+Math.round(x*sphereRadius);
+                //console.log("x: "+x+", cx: "+tempx);
                 drawPixel(imagedata,
-                    cx+Math.round(x*sphereRadius),
-                    cy+Math.round(y*sphereRadius),c);
-                //console.log("color: ("+c.r+","+c.g+","+c.b+")");
+                    cx+Math.floor(x*sphereRadius),
+                    cy+Math.floor(y*sphereRadius),c);
+                //console.log("color: ("+c[0]+","+c[1]+","+c[2]+")");
+                //console.log("x:" + tempx);
                 //console.log("x: "+Math.round(w*inputSpheres[s].x));
                 //console.log("y: "+Math.round(h*inputSpheres[s].y));
             } // end for pixels in sphere
@@ -535,6 +643,45 @@ function shadeIsect(isect,isectSphere,lights,spheres) {
     }
 }
 
+// use ray casting with triangles to get pixel colors
+function rayCastTriangles(context) {
+    var inputTriangles = getJSONFile(INPUT_TRIANGLES_URL, "triangles");
+    var inputLights = getJSONFile(INPUT_LIGHTS_URL, "lights");
+    var w = context.canvas.width;
+    var h = context.canvas.height;
+    var imagedata = context.createImageData(w, h);
+    if (inputTriangles != String.null) {
+        var x = 0; var y = 0;
+        var n = INPUT_TRIANGLES_URL.length;
+        var Dir = new Vector(0, 0, 0);
+        var closestT = Number.MAX_VALUE;
+        var c = new Color(0,0,0,0);
+        var isect = {};
+
+        // Build Triangle array
+        var triangles : Triangle[] = new Triangle[n];
+        for (var i=0; i<n; ++i) {
+            triangles[i] = new Triangle(inputTriangles[i]);
+        }
+
+        // Loop over the pixels and triangles
+        var wx = WIN_LEFT;
+        var wxd = (WIN_RIGHT - WIN_LEFT) * 1/(w-1);
+        var wy = WIN_TOP;
+        var wyd = (WIN_BOTTOM - WIN_TOP) * 1/(h-1);
+        for (y=0; y<h; y++) {
+            wx = WIN_LEFT;
+            for (x=0; x<h; x++) {
+                closestT = Number.MAX_VALUE;
+                c.change(0,0,0,255);
+                Dir.copy(Vector.substract(new Vector(wx, wy, WIN_Z), Eye));
+                for (var t=0; t<n; t++) { // loop triangles
+                    isect = rayTriangleIntersect([Eye, Dir], triangles[t], 1);
+                } // done triangles
+            } // x increase
+        } // y increase
+} // end ray cast triangles
+
 // use ray casting with spheres to get pixel colors
 function rayCastSpheres(context) {
     var inputSpheres = getJSONFile(INPUT_SPHERES_URL,"spheres");
@@ -670,7 +817,7 @@ function framelessRayCastSpheres(context) {
 
 /* constants and globals */
 
-const WIN_Z = 0;
+const WIN_Z = 0; const WIN_Z_BACK = -1;
 const WIN_LEFT = 0; const WIN_RIGHT = 1;
 const WIN_BOTTOM = 0; const WIN_TOP = 1; 
 const INPUT_SPHERES_URL = 
@@ -679,6 +826,8 @@ const INPUT_SPHERES_URL =
 const INPUT_LIGHTS_URL = 
     "https://ncsucgclass.github.io/prog1/lights.json";
     //"https://pages.github.ncsu.edu/bwatson/introcg-prog1/lights.json";
+const INPUT_TRIANGLES_URL =
+    "https://junioryi.github.io/csc562-programIO/triangles.json";
         
 var Eye = new Vector(0.5,0.5,-0.5); // set the eye position
 
