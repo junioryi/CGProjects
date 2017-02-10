@@ -167,7 +167,7 @@ class Vector {
                 var temp = new Vector(
                         u.y*v.z - u.z*v.y,
                         u.z*v.x - u.x*v.z,
-                        u.x*v.y - u.y*v.z);
+                        u.x*v.y - u.y*v.x);
                 return(Vector.normalize(temp));
             }
         } // end try
@@ -181,6 +181,10 @@ class Vector {
 
 class Triangle {
     constructor(json) {
+        //console.log(typeof(json));
+        this.set(json);
+    }
+    set(json) {
 
         // TODO:Maybe valid input here
         
@@ -188,16 +192,30 @@ class Triangle {
         this.v1 = new Vector(json.v1[0], json.v1[1], json.v1[2]);
         this.v2 = new Vector(json.v2[0], json.v2[1], json.v2[2]);
 
-        this.u = Vector.subtract(v1, v0);
-        this.v = Vector.subtract(v2, v0);
+        this.u = new Vector(0,0,0);
+        this.v = new Vector(0,0,0);
 
-        this.n = Vector.cross(u, v);
+        this.u = Vector.subtract(this.v1, this.v0);
+        this.v = Vector.subtract(this.v2, this.v0);
 
-        this.uu = Vector.dot(u, u);
-        this.vv = Vector.dot(v, v);
-        this.uv = Vector.dot(u, v);
+        this.n = Vector.normalize(Vector.cross(this.u, this.v));
 
-        this.uv_square = uv * uv;
+        this.uu = Vector.dot(this.u, this.u);
+        this.vv = Vector.dot(this.v, this.v);
+        this.uv = Vector.dot(this.u, this.v);
+
+        this.uv_square = this.uv * this.uv;
+
+        this.ambient = new Array(3);
+        this.diffuse = new Array(3);
+        this.specular = new Array(3);
+        for (var i=0; i<3; ++i) {
+            this.ambient[i] = json.ambient[i];
+            this.diffuse[i] = json.diffuse[i];
+            this.specular[i] = json.specular[i];
+        }
+
+        this.n_spec = json.n;
     }
 } // end Triangle class
 
@@ -385,6 +403,39 @@ function rayTriangleIntersect(ray, triangle, clipVal) {
         return({"exists":false, "xyz": NaN, "t":NaN});
     }
 } // end ray triangle intersection
+function rayTriangleIntersect2(ray, triangle, clipVal) {
+    try {
+        if (!(ray instanceof Array) || !(triangle instanceof Object))
+            throw "RayTriangleIntersect: ray or triangle are not formatted well.";
+        else if (ray.length != 2)
+            throw "RayTriangleIntersect: badly formatted ray.";
+        else { // valid params
+            // ray = [eye, Dir]
+            //console.log("triangle norm: " + triangle.n[0] + " " + triangle.n[1] + " " + triangle[2]);
+            var w = Vector.subtract(triangle.v0, ray[0]); // v0 - Eye
+            var t = Vector.dot(triangle.n, w) / Vector.dot(triangle.n, ray[1]);
+            if (t > 0) {
+                var hit = Vector.add(ray[0], Vector.scale(t, ray[1]));
+                var toHit = Vector.subtract(hit, triangle.v0);
+                var dot00 = triangle.uu; // ac is u
+                var dot01 = triangle.uv; 
+                var dot02 = Vector.dot(triangle.u, toHit);
+                var dot11 = triangle.vv; // ab is v
+                var dot12 = Vector.dot(triangle.v, toHit);
+                var divide = dot00 * dot11 - dot01 * dot01;
+                var u = (dot11 * dot02 - dot01 * dot12) /divide;
+                var v = (dot00 * dot12 - dot01 * dot02) /divide;
+                if (u >= 0 && v >= 0 && u+v <= 1) 
+                    return({"exists": true, "xyz": hit, "t": t});
+            }
+            return({"exists": false, "xyz":NaN, "t":NaN});
+        }
+    }
+    catch(e) {
+        console.log(e);
+        return({"exists":false, "xyz": NaN, "t":NaN});
+    }
+} // end ray triangle intersection
 
 // draw a pixel at x,y using color
 function drawPixel(imagedata,x,y,color) {
@@ -429,6 +480,7 @@ function drawRandPixels(context) {
     context.putImageData(imagedata, 0, 0);
 } // end draw random pixels
 
+/*
 // Draw region with color
 function drawRegion(context) {
     
@@ -442,12 +494,13 @@ function drawTriangle(context) {
         var cs = 0; var cy = 0;
         
         var n = inputTriangles.length;
-        for (var t=0; t<n; t++) {
+        //for (var t=0; t<n; t++) {
 
             
-        }
+        //}
     } // end if no triangle found.
 } // end draw triangle
+*/
 
 // put random points in the spheres from the class github
 function drawRandPixelsInInputSpheres(context) {
@@ -572,6 +625,63 @@ function isLightOccluded(L,isectPos,isectSphere,spheres) {
     return(lightOccluded);
 } // end is light occluded
 
+// 
+function shadeIsectTriangle(isect, triangle, lights) {
+    try {
+        if (!(isect instanceof Object) || !(triangle instanceof Triangle) 
+            || !(lights instanceof Array)) {
+            throw "shadeIsectTriangle: bad parameter passed.";
+        }   
+        
+        var c = new Color(0,0,0,255);
+
+        var lightOccluded = false;
+        var Lloc = new Vector(0,0,0);
+        for (var l=0; l<lights.length; l++) {
+            for (var i=0; i<3; i++) {
+                c[i] += lights[l].ambient[i] * triangle.ambient[i];
+            }
+            Lloc.set(lights[l].x, lights[l].y, lights[l].z);
+            var L = Vector.subtract(Lloc, isect.xyz);
+            L.toConsole("Light path: ");
+
+            // if light isn't occluded
+            //if (!isLightOccluded(L, isect.xyz, triangle)) {
+            if (true) {
+
+                // normal is plane normal
+                var N = triangle.n;
+                var diffFactor = Math.max(0, Vector.dot(N, Vector.normalize(L)));
+                if (diffFactor > 0) {
+                    for (var i=0; i<3; i++) {
+                        c[i] += lights[l].diffuse[i] * triangle.diffuse[i] * diffFactor;
+                    }
+                } // end nonzero diffuse factor
+
+                // add in the specular light
+                var V = Vector.normalize(Vector.subtract(Eye, isect.xyz)); // View vector
+                var H = Vector.normalize(Vector.add(L, V)); // half vector
+
+                var specFactor = Math.max(0, Vector.dot(N, H));
+                if (specFactor > 0) {
+                    var newSpecFactor = specFactor;
+                    for (var s=1; s<triangle.n_spec; s++) 
+                        newSpecFactor *= specFactor;
+                    for (var i=0; i<3; i++) 
+                        c[i] += lights[l].specular[i] * triangle.specular[i] * newSpecFactor;
+                }
+            } // end if light is not occluded
+        } // done all light
+        for (var i=0; i<3; i++) 
+            c[i] = 255*Math.min(1, c[i]);
+        return(c);
+    }
+    catch(e) {
+        console.log("shadeIsectTriangle error: "+e);
+        return(Object.null);
+    }
+}
+
 // color the passed intersection and sphere
 function shadeIsect(isect,isectSphere,lights,spheres) {
     try {
@@ -652,34 +762,57 @@ function rayCastTriangles(context) {
     var imagedata = context.createImageData(w, h);
     if (inputTriangles != String.null) {
         var x = 0; var y = 0;
-        var n = INPUT_TRIANGLES_URL.length;
+        var n = inputTriangles.length;
         var Dir = new Vector(0, 0, 0);
         var closestT = Number.MAX_VALUE;
         var c = new Color(0,0,0,0);
+        console.log(typeof(c));
         var isect = {};
 
         // Build Triangle array
-        var triangles : Triangle[] = new Triangle[n];
+        var triangles = new Array(n);
         for (var i=0; i<n; ++i) {
+            console.log("Triangle vertex 0: " + 
+                    inputTriangles[i].v0[0] + " " + 
+                    inputTriangles[i].v0[1] + " " + 
+                    inputTriangles[i].v0[2]);
             triangles[i] = new Triangle(inputTriangles[i]);
         }
+        triangles[0].n.toConsole();
 
         // Loop over the pixels and triangles
         var wx = WIN_LEFT;
         var wxd = (WIN_RIGHT - WIN_LEFT) * 1/(w-1);
         var wy = WIN_TOP;
         var wyd = (WIN_BOTTOM - WIN_TOP) * 1/(h-1);
+        var total = 0;
         for (y=0; y<h; y++) {
             wx = WIN_LEFT;
             for (x=0; x<h; x++) {
                 closestT = Number.MAX_VALUE;
                 c.change(0,0,0,255);
-                Dir.copy(Vector.substract(new Vector(wx, wy, WIN_Z), Eye));
+                Dir.copy(Vector.subtract(new Vector(wx, wy, WIN_Z), Eye));
+                //Dir.toConsole("Dir: ");
+                total += 1;
                 for (var t=0; t<n; t++) { // loop triangles
-                    isect = rayTriangleIntersect([Eye, Dir], triangles[t], 1);
-                } // done triangles
+                    isect = rayTriangleIntersect2([Eye, Dir], triangles[t], 1);
+                    //console.log(isect.exists);
+                    if (isect.exists) {
+                        console.log("intersect");
+                        if (isect.t < closestT) {
+                            closestT = isect.t;
+                            c = shadeIsectTriangle(isect, triangles[t], inputLights);
+                        }
+                    }
+                } // done all triangles
+                drawPixel(imagedata,x,y,c);
+                wx += wxd;
             } // x increase
+            wy += wyd;
         } // y increase
+        console.log(total);
+        context.putImageData(imagedata, 0, 0);
+    }
 } // end ray cast triangles
 
 // use ray casting with spheres to get pixel colors
@@ -850,7 +983,8 @@ function main() {
     //drawInputSpheresUsingArcs(context);
       // shows how to read input file, but not how to draw pixels
       
-    rayCastSpheres(context); 
+    //rayCastSpheres(context); 
+    rayCastTriangles(context);
     
     //framelessRayCastSpheres(context);
 }
