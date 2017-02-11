@@ -592,41 +592,29 @@ function isLightOccluded(L,isectPos,isectSphere,spheres) {
     var s=0; // which sphere
     var lightOccluded = false; // if light is occluded
     var occluderIsect = {}; // occluder intersect details
-    // console.log("testing for occlusions");
     
-    // check each light up to intersected sphere to see if it occludes
-    while ((!lightOccluded) && (s<isectSphere)) { 
-        occluderIsect = raySphereIntersect([isectPos,L],spheres[s],0);
+    var numSpheres = spheres.length;
+    while ((!lightOccluded) && (s<numSpheres)) {
+        if (s == isectSphere) {
+            // Skip the sphere itself.
+            s++;
+            continue;
+        }
+        occluderIsect = raySphereIntersect([isectPos, L], spheres[s], 0);
         if (!occluderIsect.exists) { // no intersection
-            s++; // on to next sphere
+            s++;
         } else if (occluderIsect.t > 1) { // light in front of intersection
-            s++; // on to next sphere
+            s++;
         } else {
             lightOccluded = true;
-            // console.log("occlusion found from sphere "+isectSphere+" to "+s);
-        } // end if occlusion found
-    } // while all lights up to one intersected by eye
-    
-    // check each light after intersected sphere to see if it occludes
-    s = isectSphere+1;
-    while ((!lightOccluded) && (s<spheres.length)) { 
-        occluderIsect = raySphereIntersect([isectPos,L],spheres[s],0);
-        // console.log("oisect: "+occluderIsect);
-        if (!occluderIsect.exists) { // no intersection
-            s++; // on to next sphere
-        } else if (occluderIsect.t > 1) { // light in front of intersection
-            s++; // on to next sphere
-        } else {
-            lightOccluded = true;
-            // console.log("occlusion found from sphere "+isectSphere+" to "+s);
-        } // end if occlusion found
-    } // while all lights after one intersected by eye
-    
+        }
+    }
+     
     return(lightOccluded);
 } // end is light occluded
 
 // 
-function shadeIsectTriangle(isect, triangle, lights) {
+function shadeIsectTriangle(isect, triangle, lights, spheres) {
     try {
         if (!(isect instanceof Object) || !(triangle instanceof Triangle) 
             || !(lights instanceof Array)) {
@@ -643,15 +631,14 @@ function shadeIsectTriangle(isect, triangle, lights) {
             }
             Lloc.set(lights[l].x, lights[l].y, lights[l].z);
             var L = Vector.subtract(Lloc, isect.xyz);
-            L.toConsole("Light path: ");
+            //L.toConsole("Light path: ");
 
             // if light isn't occluded
-            //if (!isLightOccluded(L, isect.xyz, triangle)) {
-            if (true) {
+            if (!isLightOccluded(L, isect.xyz, -1, spheres)) { // -1 means test all spheres
 
                 // normal is plane normal
                 var N = triangle.n;
-                var diffFactor = Math.max(0, Vector.dot(N, Vector.normalize(L)));
+                var diffFactor = Math.max(0, Math.abs(Vector.dot(N, Vector.normalize(L))));
                 if (diffFactor > 0) {
                     for (var i=0; i<3; i++) {
                         c[i] += lights[l].diffuse[i] * triangle.diffuse[i] * diffFactor;
@@ -662,7 +649,7 @@ function shadeIsectTriangle(isect, triangle, lights) {
                 var V = Vector.normalize(Vector.subtract(Eye, isect.xyz)); // View vector
                 var H = Vector.normalize(Vector.add(L, V)); // half vector
 
-                var specFactor = Math.max(0, Vector.dot(N, H));
+                var specFactor = Math.max(0, Math.abs(Vector.dot(N, H)));
                 if (specFactor > 0) {
                     var newSpecFactor = specFactor;
                     for (var s=1; s<triangle.n_spec; s++) 
@@ -753,6 +740,75 @@ function shadeIsect(isect,isectSphere,lights,spheres) {
     }
 }
 
+// Cast everything
+function rayCastAll(context) {
+    var inputTriangles = getJSONFile(INPUT_TRIANGLES_URL, "triangles");
+    var inputLights = getJSONFile(INPUT_LIGHTS_URL, "lights");
+    var inputSpheres = getJSONFile(INPUT_SPHERES_URL, "spheres");
+    console.log(typeof(inputSpheres));
+    console.log(typeof(inputSpheres[0]));
+
+    var w = context.canvas.width;
+    var h = context.canvas.height;
+    var imagedata = context.createImageData(w, h);
+
+    var numTriangles = inputTriangles.length;
+    var numSpheres   = inputSpheres.length;
+
+    var triangles = new Array(numTriangles);
+    for (var i=0; i<numTriangles; i++) {
+        triangles[i] = new Triangle(inputTriangles[i]);
+    }
+
+    var x = 0; var y = 0;
+    var Dir = new Vector(0,0,0);
+    var closestT = Number.MAX_VALUE;
+    var c = new Color(0,0,0,0);
+    var isect = {};
+    // Loop over pixels 
+    var wx = WIN_LEFT;
+    var wxd = (WIN_RIGHT - WIN_LEFT) * 1/(w-1);
+    var wy = WIN_TOP;
+    var wyd = (WIN_BOTTOM - WIN_TOP) * 1/(h-1);
+    for (y=0; y<h; y++) {
+        wx = WIN_LEFT;
+        for (x=0; x<h; x++) {
+            closestT = Number.MAX_VALUE;
+            c.change(0,0,0,255);
+            Dir.copy(Vector.subtract(new Vector(wx, wy, WIN_Z), Eye));
+            // Check Sphere first
+            var hitSphere = false;
+            for (var s=0; s<numSpheres; s++) {
+                //for (var s=0; s<1; s++) {
+                isect = raySphereIntersect([Eye,Dir],inputSpheres[s],1); 
+                if (isect.exists) {// there is an intersect
+                    hitSphere = true;
+                    if (isect.t < closestT) { // it is the closest yet
+                        closestT = isect.t; // record closest t yet
+                        c = shadeIsect(isect,s,inputLights,inputSpheres); 
+                    } // end if closest yet
+                }
+            } // done all spheres
+            for (var t=0; t<numTriangles; t++) { // loop triangles
+                //for (var t=0; t<1; ++t) {
+                isect = rayTriangleIntersect2([Eye, Dir], triangles[t], 1);
+                if (isect.exists) {
+                    if (isect.t < closestT) {
+                        closestT = isect.t;
+                        c = shadeIsectTriangle(isect, triangles[t], inputLights, inputSpheres);
+                    }
+                    // Triangle can break
+                    break;
+                }
+            } // done all triangles
+            drawPixel(imagedata,x,y,c);
+            wx += wxd;
+        }
+        wy += wyd;
+    }
+    context.putImageData(imagedata, 0, 0);
+} // End of rayCastAll
+
 // use ray casting with triangles to get pixel colors
 function rayCastTriangles(context) {
     var inputTriangles = getJSONFile(INPUT_TRIANGLES_URL, "triangles");
@@ -766,16 +822,12 @@ function rayCastTriangles(context) {
         var Dir = new Vector(0, 0, 0);
         var closestT = Number.MAX_VALUE;
         var c = new Color(0,0,0,0);
-        console.log(typeof(c));
         var isect = {};
+        //console.log("Number of triangles: "+n);
 
         // Build Triangle array
         var triangles = new Array(n);
         for (var i=0; i<n; ++i) {
-            console.log("Triangle vertex 0: " + 
-                    inputTriangles[i].v0[0] + " " + 
-                    inputTriangles[i].v0[1] + " " + 
-                    inputTriangles[i].v0[2]);
             triangles[i] = new Triangle(inputTriangles[i]);
         }
         triangles[0].n.toConsole();
@@ -785,7 +837,6 @@ function rayCastTriangles(context) {
         var wxd = (WIN_RIGHT - WIN_LEFT) * 1/(w-1);
         var wy = WIN_TOP;
         var wyd = (WIN_BOTTOM - WIN_TOP) * 1/(h-1);
-        var total = 0;
         for (y=0; y<h; y++) {
             wx = WIN_LEFT;
             for (x=0; x<h; x++) {
@@ -793,16 +844,16 @@ function rayCastTriangles(context) {
                 c.change(0,0,0,255);
                 Dir.copy(Vector.subtract(new Vector(wx, wy, WIN_Z), Eye));
                 //Dir.toConsole("Dir: ");
-                total += 1;
                 for (var t=0; t<n; t++) { // loop triangles
                     isect = rayTriangleIntersect2([Eye, Dir], triangles[t], 1);
                     //console.log(isect.exists);
                     if (isect.exists) {
-                        console.log("intersect");
+                        //console.log("intersect");
                         if (isect.t < closestT) {
                             closestT = isect.t;
                             c = shadeIsectTriangle(isect, triangles[t], inputLights);
                         }
+                        break;
                     }
                 } // done all triangles
                 drawPixel(imagedata,x,y,c);
@@ -810,7 +861,6 @@ function rayCastTriangles(context) {
             } // x increase
             wy += wyd;
         } // y increase
-        console.log(total);
         context.putImageData(imagedata, 0, 0);
     }
 } // end ray cast triangles
@@ -984,7 +1034,8 @@ function main() {
       // shows how to read input file, but not how to draw pixels
       
     //rayCastSpheres(context); 
-    rayCastTriangles(context);
+    //rayCastTriangles(context);
+    rayCastAll(context);
     
     //framelessRayCastSpheres(context);
 }
