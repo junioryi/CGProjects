@@ -369,48 +369,6 @@ function rayTriangleIntersect(ray, triangle, clipVal) {
             throw "RayTriangleIntersect: badly formatted ray.";
         else { // valid params
             // ray = [eye, Dir]
-            var w0 = Vector.subtract(ray[0], triangle.v0);
-            var a  = Vector.dot(triangle.n, w0);
-            var b  = Vector.dot(triangle.n, ray[1]);
-            var r  = a / b;
-            if (Math.abs(b) < 0.001) // ray is parallel to triangle.
-                throw "Ray is Parallel to triangle";
-            else if (r < 0.0) 
-                throw "Ray goes away.";
-            else {
-                // Test if point is inside triangle
-                var I = Vector.add(ray[0], Vector.scale(r, ray[1])); // Intersection point
-                var w = Vector.subtract(I, triangle.v0); 
-                var wu = Vector.dot(w, triangle.u);
-                var wv = Vector.dot(w, triangle.v);
-                var D = triangle.uv_square - triangle.uu * triangle.vv; // denominator
-
-                // Get and test parameters
-                var s = (triangle.uv * wv - triangle.vv * wu) / D;
-                if (s < 0.0 || s > 1.0) 
-                    throw "No intersection because s not satisfied";
-                var t = (triangle.uv * wu - triangle.uu * wv) / D;
-                if (t < 0.0 || (s + t) > 1.0) 
-                    throw "No intersection because t not satisfied";
-
-                // Return intersection point I
-                return({"exists": true, "xyz": I, "t":r});                
-            }
-        }
-    }
-    catch(e) {
-        console.log(e);
-        return({"exists":false, "xyz": NaN, "t":NaN});
-    }
-} // end ray triangle intersection
-function rayTriangleIntersect2(ray, triangle, clipVal) {
-    try {
-        if (!(ray instanceof Array) || !(triangle instanceof Object))
-            throw "RayTriangleIntersect: ray or triangle are not formatted well.";
-        else if (ray.length != 2)
-            throw "RayTriangleIntersect: badly formatted ray.";
-        else { // valid params
-            // ray = [eye, Dir]
             //console.log("triangle norm: " + triangle.n[0] + " " + triangle.n[1] + " " + triangle[2]);
             var w = Vector.subtract(triangle.v0, ray[0]); // v0 - Eye
             var t = Vector.dot(triangle.n, w) / Vector.dot(triangle.n, ray[1]);
@@ -479,28 +437,6 @@ function drawRandPixels(context) {
     } // end for x
     context.putImageData(imagedata, 0, 0);
 } // end draw random pixels
-
-/*
-// Draw region with color
-function drawRegion(context) {
-    
-} // end draw region
-
-// Draw triangles
-function drawTriangle(context) {
-    var inputTriangles = getJSONFile(INPUT_TRIANGLES_URL, "triangles");
-    if (inputTriangles != String.null) {
-        var x = 0; var y = 0;
-        var cs = 0; var cy = 0;
-        
-        var n = inputTriangles.length;
-        //for (var t=0; t<n; t++) {
-
-            
-        //}
-    } // end if no triangle found.
-} // end draw triangle
-*/
 
 // put random points in the spheres from the class github
 function drawRandPixelsInInputSpheres(context) {
@@ -745,8 +681,6 @@ function rayCastAll(context) {
     var inputTriangles = getJSONFile(INPUT_TRIANGLES_URL, "triangles");
     var inputLights = getJSONFile(INPUT_LIGHTS_URL, "lights");
     var inputSpheres = getJSONFile(INPUT_SPHERES_URL, "spheres");
-    console.log(typeof(inputSpheres));
-    console.log(typeof(inputSpheres[0]));
 
     var w = context.canvas.width;
     var h = context.canvas.height;
@@ -776,31 +710,46 @@ function rayCastAll(context) {
             closestT = Number.MAX_VALUE;
             c.change(0,0,0,255);
             Dir.copy(Vector.subtract(new Vector(wx, wy, WIN_Z), Eye));
-            // Check Sphere first
+            // Keep the intersection information, compute color afterward
             var hitSphere = false;
+            var tempIsect = {};
+            var sphereIdx = -1;
+            var tempTriangle;
+            // Check spheres
             for (var s=0; s<numSpheres; s++) {
-                //for (var s=0; s<1; s++) {
                 isect = raySphereIntersect([Eye,Dir],inputSpheres[s],1); 
                 if (isect.exists) {// there is an intersect
-                    hitSphere = true;
                     if (isect.t < closestT) { // it is the closest yet
+                        hitSphere = true;
                         closestT = isect.t; // record closest t yet
-                        c = shadeIsect(isect,s,inputLights,inputSpheres); 
+                        //c = shadeIsect(isect,s,inputLights,inputSpheres); 
+                        tempIsect = isect;
+                        sphereIdx = s;
                     } // end if closest yet
                 }
             } // done all spheres
+            // Check trangles
             for (var t=0; t<numTriangles; t++) { // loop triangles
-                //for (var t=0; t<1; ++t) {
-                isect = rayTriangleIntersect2([Eye, Dir], triangles[t], 1);
+                isect = rayTriangleIntersect([Eye, Dir], triangles[t], 1);
                 if (isect.exists) {
                     if (isect.t < closestT) {
+                        hitSphere = false;
                         closestT = isect.t;
-                        c = shadeIsectTriangle(isect, triangles[t], inputLights, inputSpheres);
+                        //c = shadeIsectTriangle(isect, triangles[t], inputLights, inputSpheres);
+                        tempIsect = isect;
+                        tempTriangle = triangles[t];
                     }
                     // Triangle can break
                     break;
                 }
             } // done all triangles
+
+            // Compute color 
+            if (hitSphere) 
+                c = shadeIsect(tempIsect, sphereIdx, inputLights, inputSpheres);
+            else
+                c = shadeIsectTriangle(tempIsect, tempTriangle, inputLights, inputSpheres);
+
             drawPixel(imagedata,x,y,c);
             wx += wxd;
         }
@@ -845,7 +794,7 @@ function rayCastTriangles(context) {
                 Dir.copy(Vector.subtract(new Vector(wx, wy, WIN_Z), Eye));
                 //Dir.toConsole("Dir: ");
                 for (var t=0; t<n; t++) { // loop triangles
-                    isect = rayTriangleIntersect2([Eye, Dir], triangles[t], 1);
+                    isect = rayTriangleIntersect([Eye, Dir], triangles[t], 1);
                     //console.log(isect.exists);
                     if (isect.exists) {
                         //console.log("intersect");
@@ -1004,10 +953,12 @@ const WIN_Z = 0; const WIN_Z_BACK = -1;
 const WIN_LEFT = 0; const WIN_RIGHT = 1;
 const WIN_BOTTOM = 0; const WIN_TOP = 1; 
 const INPUT_SPHERES_URL = 
-    "https://ncsucgclass.github.io/prog1/spheres.json";
+    "https://junioryi.github.io/csc562-programIO/spheres.json";
+    //"https://ncsucgclass.github.io/prog1/spheres.json";
     //"https://pages.github.ncsu.edu/bwatson/introcg-prog1/spheres.json";
 const INPUT_LIGHTS_URL = 
-    "https://ncsucgclass.github.io/prog1/lights.json";
+    "https://junioryi.github.io/csc562-programIO/lights.json";
+    //"https://ncsucgclass.github.io/prog1/lights.json";
     //"https://pages.github.ncsu.edu/bwatson/introcg-prog1/lights.json";
 const INPUT_TRIANGLES_URL =
     "https://junioryi.github.io/csc562-programIO/triangles.json";
