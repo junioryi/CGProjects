@@ -39,6 +39,20 @@ class Color {
         }
     } // end Color change method 
 
+    add(c) {
+        try {
+            if (!(c instanceof Color)) 
+                throw "Adding non-color to color.";
+            else {
+                for (var i=0; i<3; ++i) 
+                    this[i] += c[i];
+            }
+        }
+        catch(e) {
+            console.log(e);
+        }
+    }
+
     toConsole(prefix) {
         console.log(prefix+"["+this[0]+","+this[1]+","+this[2]+"]");
     } // end to console
@@ -703,6 +717,176 @@ function shadeIsect(isect,isectSphere,lights,spheres) {
         return(Object.null);
     }
 }
+
+function hitCheck(viewpoint, Dir, inputSpheres, triangles, inputLights, frontWall) {
+    try {
+        var closestT = Number.MAX_VALUE;
+        var c = new Color(0,0,0,255);
+        var numSpheres = inputSpheres.length;
+        var numTriangles = triangles.length;
+        // Ignore front wall
+        if (!(frontWall)) 
+            numTriangles -= 2;
+        //Dir.copy(Vector.subtract(new Vector(wx, wy, WIN_Z), Eye));
+        // Keep the intersection information, compute color afterward
+        var hitSphere = false;
+        var tempIsect = {"exists":false};
+        var sphereIdx = -1;
+        var tempTriangle;
+        // Check spheres
+        for (var s=0; s<numSpheres; s++) {
+            isect = raySphereIntersect([viewpoint,Dir],inputSpheres[s],1); 
+            if (isect.exists) {// there is an intersect
+                if (isect.t < closestT) { // it is the closest yet
+                    hitSphere = true;
+                    closestT = isect.t; // record closest t yet
+                    //c = shadeIsect(isect,s,inputLights,inputSpheres); 
+                    tempIsect = isect;
+                    sphereIdx = s;
+                } // end if closest yet
+            }
+        } // done all spheres
+        // Check trangles
+        for (var t=0; t<numTriangles; t++) { // loop triangles
+            isect = rayTriangleIntersect([viewpoint, Dir], triangles[t], 1);
+            if (isect.exists) {
+                if (isect.t < closestT) {
+                    hitSphere = false;
+                    closestT = isect.t;
+                    //c = shadeIsectTriangle(isect, triangles[t], inputLights, inputSpheres);
+                    tempIsect = isect;
+                    tempTriangle = triangles[t];
+                }
+                // Triangle can break since it cannot hit two triangles in this case.
+                break;
+            }
+        } // done all triangles
+
+        // Compute color 
+        if (!(tempIsect.exists)) {
+            throw "tracer not hit anything";
+        }
+        return ({"isect": tempIsect, "hitSphere": hitSphere, "sphereIdx":sphereIdx, "triangle":tempTriangle});
+
+    }
+    catch(e) {
+        console.log(e);
+        return ({"isect": {"exists":false}, "hitSphere": false, "sphereIdx":-1, "triangle":null});
+    }
+}
+
+function radiance(tempIsect, hitSphere, sphereIdx, tempTriangle, inputLights, inputSpheres, russian, numSample) {
+    try{
+        if (russian >= 1) 
+            throw "Russian roulette should be less than 1.";
+        if (hitSphere) {
+            // Direct
+            c = shadeIsect(tempIsect, sphereIdx, inputLights, inputSpheres);
+            // Indirect
+            if (false) {
+                var tempColor = new Color(0,0,0,0);
+                for (var s=0; s<numSample; ++s) {
+                    // Find the intersection surface
+                    var sphereCenter = new Vector(
+                            inputSpheres[sphereIdx].x,
+                            inputSpheres[sphereIdx].y,
+                            inputSpheres[sphereIdx].z);
+                    var surface_n = Vector.normalize(
+                            Vector.subtract(tempIsect.xyz, sphereCenter)); 
+                    var surface_x = Vector.cross(Vector.normalize(Dir), surface_n);
+                    var surface_y = Vector.cross(surface_x, surface_n);
+
+                    // Random sampling
+                    var sample_dir = Vector.normalize(Vector.add3(
+                            Vector.scale(Math.random(), surface_n),
+                            Vector.scale(Math.random()*2 - 1, surface_x),
+                            Vector.scale(Math.random()*2 - 1, surface_y)));
+                    var assertDot = Vector.dot(sample_dir, surface_n);
+                    var test_norm = Vector.cross(surface_x, surface_y);
+                    if (assertDot < 0 || assertDot > 1) 
+                        throw "assertDot in sphere fails";
+                    //sphereCenter.toConsole();
+                    //surface_n.toConsole();
+                    //sample_dir.toConsole();
+
+                    // Sampled color
+                    var sample_c = tracer(tempIsect.xyz, sample_dir, inputSpheres, 
+                            triangles, inputLights, false, true, 1);
+                    if (sample_c[1] == 255) 
+                        // It shouldn't happen.
+                        sample_c = black;
+                    
+                    for (var i=0; i<3; ++i) {
+                        tempColor[i] += sample_c[i];
+                    }
+                }
+                for (var i=0; i<3; ++i) {
+                    tempColor[i] /= numSample;
+                    c[i] += 0.7*tempColor[i];
+                }
+            }
+        } // End intersect with sphere
+        else {
+            c = shadeIsectTriangle(tempIsect, tempTriangle, inputLights, inputSpheres);
+            if (false) {
+                var tempColor = new Color(0,0,0,0);
+                for (var s=0; s<numSample; ++s) {
+                    var DirNormDot = Vector.dot(tempTriangle.n, Dir);
+                    // Reverse the norm if point to the same direction as Dir
+                    if (DirNormDot > 0) 
+                        tempTriangle.n = Vector.scale(-1.0, tempTriangle.n);
+
+                    // Random sampling
+                    var surface_x = Vector.cross(tempTriangle.n, Vector.normalize(Dir));
+                    var surface_y = Vector.cross(tempTriangle.n, surface_x);
+
+                    // Random sampling
+                    var sample_dir = Vector.normalize(Vector.add3(
+                                Vector.scale(Math.random(), tempTriangle.n),
+                                Vector.scale(Math.random()*2 - 1, surface_x),
+                                Vector.scale(Math.random()*2 - 1, surface_y)));
+                    var sample_c = tracer(tempIsect.xyz, sample_dir, inputSpheres, 
+                            triangles, inputLights, false, true, 1);
+                    if (sample_c[1] == 1) 
+                        sample_c = black;
+
+                    for (var i=0; i<3; ++i) {
+                        tempColor[i] += sample_c[i];
+                    }
+                }
+                for (var i=0; i<3; ++i) {
+                    tempColor[i] /= numSample;
+                    c[i] += 0.7*tempColor[i];
+                }
+            }
+        } // End intersect with triangle
+        return c;
+    }
+    catch(e) {
+        console.log(e);
+        return new Color(25,25,25,255);
+    }
+}
+
+
+function newTracer(viewpoint, Dir, inputSpheres, triangles, inputLights, recursive, frontWall, numSample) {
+    try {
+        var hit = hitCheck(viewpoint, Dir, inputSpheres, triangles, inputLights, frontWall);
+        //return ({"isect": tempIsect, "hitSphere": hitSphere, "sphereIdx":sphereIdx, "triangle":tempTriangle});
+        if (!(hit.isect.exists)) // Not hit anything
+            throw "new tracer not hit.";
+        // Hit something
+        var color = radiance(hit.isect, hit.hitSphere, hit.sphereIdx, hit.triangle, inputLights, inputSpheres, 0.5, 1);
+        return color;
+    }
+    catch(e) {
+        console.log(e);
+        return (new Color(255,255,255,255));
+    }
+}
+
+
+
 function tracer(viewpoint, Dir, inputSpheres, triangles, inputLights, recursive, frontWall, numSample) {
     try {
         var closestT = Number.MAX_VALUE;
@@ -756,8 +940,6 @@ function tracer(viewpoint, Dir, inputSpheres, triangles, inputLights, recursive,
         else if (hitSphere) {
             // Find the color on the intersection
             c = shadeIsect(tempIsect, sphereIdx, inputLights, inputSpheres);
-            // BRDF
-        
 
             if (recursive) {
                 var tempColor = new Color(0,0,0,0);
@@ -876,7 +1058,9 @@ function rayCastAll(context, numberSample) {
         for (x=0; x<h; x++) {
             Dir.copy(Vector.subtract(new Vector(wx, wy, WIN_Z), Eye));
             // Trace the light
-            c = tracer(Eye, Dir, inputSpheres, triangles, inputLights, true, false, numberSample);
+            //c = tracer(Eye, Dir, inputSpheres, triangles, inputLights, true, false, numberSample);
+            c = newTracer(Eye, Dir, inputSpheres, triangles, inputLights, true, false, numberSample);
+            //c.toConsole("returned color: ");
             // Draw color in that pixel
             drawPixel(imagedata,x,y,c);
             wx += wxd;
