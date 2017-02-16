@@ -775,15 +775,16 @@ function hitCheck(viewpoint, Dir, inputSpheres, triangles, inputLights, frontWal
     }
 }
 
-function radiance(tempIsect, hitSphere, sphereIdx, tempTriangle, inputLights, inputSpheres, russian, numSample) {
+function radiance(Dir, tempIsect, hitSphere, sphereIdx, tempTriangle, triangles, inputLights, inputSpheres, russian, numSample) {
     try{
         if (russian >= 1) 
             throw "Russian roulette should be less than 1.";
         if (hitSphere) {
             // Direct
+            var c = new Color(0,0,0,0);
             c = shadeIsect(tempIsect, sphereIdx, inputLights, inputSpheres);
             // Indirect
-            if (false) {
+            if (Math.random() < russian) {
                 var tempColor = new Color(0,0,0,0);
                 for (var s=0; s<numSample; ++s) {
                     // Find the intersection surface
@@ -801,30 +802,27 @@ function radiance(tempIsect, hitSphere, sphereIdx, tempTriangle, inputLights, in
                             Vector.scale(Math.random(), surface_n),
                             Vector.scale(Math.random()*2 - 1, surface_x),
                             Vector.scale(Math.random()*2 - 1, surface_y)));
-                    var assertDot = Vector.dot(sample_dir, surface_n);
-                    var test_norm = Vector.cross(surface_x, surface_y);
-                    if (assertDot < 0 || assertDot > 1) 
-                        throw "assertDot in sphere fails";
-                    //sphereCenter.toConsole();
-                    //surface_n.toConsole();
-                    //sample_dir.toConsole();
+                    var sample_factor = Vector.dot(sample_dir, surface_n);
+                    if (sample_factor < 0 || sample_factor > 1) 
+                        throw "Random sample direction fails.";
+
+                    // Skip small light
+                    if (sample_factor < 0.2) continue; // Skip small light 
 
                     // Sampled color
-                    var sample_c = tracer(tempIsect.xyz, sample_dir, inputSpheres, 
-                            triangles, inputLights, false, true, 1);
-                    if (sample_c[1] == 255) 
-                        // It shouldn't happen.
-                        sample_c = black;
+                    var sample_c = newTracer(tempIsect.xyz, sample_dir, inputSpheres,
+                            triangles, inputLights, 0, true, 0);
                     
                     for (var i=0; i<3; ++i) {
-                        tempColor[i] += sample_c[i];
+                        tempColor[i] += sample_factor*sample_c[i];
                     }
                 }
                 for (var i=0; i<3; ++i) {
                     tempColor[i] /= numSample;
-                    c[i] += 0.7*tempColor[i];
+                    c[i] += 0.5*tempColor[i];
                 }
             }
+            return c;
         } // End intersect with sphere
         else {
             c = shadeIsectTriangle(tempIsect, tempTriangle, inputLights, inputSpheres);
@@ -869,19 +867,20 @@ function radiance(tempIsect, hitSphere, sphereIdx, tempTriangle, inputLights, in
 }
 
 
-function newTracer(viewpoint, Dir, inputSpheres, triangles, inputLights, recursive, frontWall, numSample) {
+function newTracer(viewpoint, Dir, inputSpheres, triangles, inputLights, russian, frontWall, numSample) {
     try {
         var hit = hitCheck(viewpoint, Dir, inputSpheres, triangles, inputLights, frontWall);
         //return ({"isect": tempIsect, "hitSphere": hitSphere, "sphereIdx":sphereIdx, "triangle":tempTriangle});
         if (!(hit.isect.exists)) // Not hit anything
             throw "new tracer not hit.";
         // Hit something
-        var color = radiance(hit.isect, hit.hitSphere, hit.sphereIdx, hit.triangle, inputLights, inputSpheres, 0.5, 1);
+        var color = radiance(Dir, hit.isect, hit.hitSphere, hit.sphereIdx, hit.triangle, triangles, inputLights, inputSpheres, russian, numSample);
         return color;
     }
     catch(e) {
         console.log(e);
-        return (new Color(255,255,255,255));
+        //return (new Color(255,255,255,255));
+        return (new Color(0,255,0,255));
     }
 }
 
@@ -1027,7 +1026,7 @@ function tracer(viewpoint, Dir, inputSpheres, triangles, inputLights, recursive,
 }
 
 // Cast everything
-function rayCastAll(context, numberSample) {
+function rayCastAll(context, numberSample, russian) {
     var inputTriangles = getJSONFile(INPUT_TRIANGLES_URL, "triangles");
     var inputLights = getJSONFile(INPUT_LIGHTS_URL, "lights");
     var inputSpheres = getJSONFile(INPUT_SPHERES_URL, "spheres");
@@ -1059,7 +1058,7 @@ function rayCastAll(context, numberSample) {
             Dir.copy(Vector.subtract(new Vector(wx, wy, WIN_Z), Eye));
             // Trace the light
             //c = tracer(Eye, Dir, inputSpheres, triangles, inputLights, true, false, numberSample);
-            c = newTracer(Eye, Dir, inputSpheres, triangles, inputLights, true, false, numberSample);
+            c = newTracer(Eye, Dir, inputSpheres, triangles, inputLights, russian, false, numberSample);
             //c.toConsole("returned color: ");
             // Draw color in that pixel
             drawPixel(imagedata,x,y,c);
@@ -1300,7 +1299,7 @@ function main() {
     //rayCastSpheres(context); 
     //rayCastTriangles(context);
     var numberSample = 20;
-    rayCastAll(context, numberSample);
+    rayCastAll(context, numberSample, 0.5);
     
     //framelessRayCastSpheres(context);
 }
