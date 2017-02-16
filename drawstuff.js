@@ -777,11 +777,11 @@ function hitCheck(viewpoint, Dir, inputSpheres, triangles, inputLights, frontWal
 
 function radiance(Dir, tempIsect, hitSphere, sphereIdx, tempTriangle, triangles, inputLights, inputSpheres, russian, numSample) {
     try{
-        if (russian >= 1) 
+        if (russian >= 1.001) 
             throw "Russian roulette should be less than 1.";
+        var c = new Color(0,0,0,0);
         if (hitSphere) {
             // Direct
-            var c = new Color(0,0,0,0);
             c = shadeIsect(tempIsect, sphereIdx, inputLights, inputSpheres);
             // Indirect
             if (Math.random() < russian) {
@@ -826,7 +826,7 @@ function radiance(Dir, tempIsect, hitSphere, sphereIdx, tempTriangle, triangles,
         } // End intersect with sphere
         else {
             c = shadeIsectTriangle(tempIsect, tempTriangle, inputLights, inputSpheres);
-            if (false) {
+            if (Math.random() < russian) {
                 var tempColor = new Color(0,0,0,0);
                 for (var s=0; s<numSample; ++s) {
                     var DirNormDot = Vector.dot(tempTriangle.n, Dir);
@@ -843,10 +843,13 @@ function radiance(Dir, tempIsect, hitSphere, sphereIdx, tempTriangle, triangles,
                                 Vector.scale(Math.random(), tempTriangle.n),
                                 Vector.scale(Math.random()*2 - 1, surface_x),
                                 Vector.scale(Math.random()*2 - 1, surface_y)));
-                    var sample_c = tracer(tempIsect.xyz, sample_dir, inputSpheres, 
-                            triangles, inputLights, false, true, 1);
-                    if (sample_c[1] == 1) 
-                        sample_c = black;
+
+                    var sample_factor = Vector.dot(sample_dir, tempTriangle.n);
+                    if (sample_factor < 0 || sample_factor > 1) 
+                        throw "Random sampling direction fail triangle";
+
+                    var sample_c = newTracer(tempIsect.xyz, sample_dir, inputSpheres,
+                            triangles, inputLights, 0, true, 0);
 
                     for (var i=0; i<3; ++i) {
                         tempColor[i] += sample_c[i];
@@ -854,7 +857,7 @@ function radiance(Dir, tempIsect, hitSphere, sphereIdx, tempTriangle, triangles,
                 }
                 for (var i=0; i<3; ++i) {
                     tempColor[i] /= numSample;
-                    c[i] += 0.7*tempColor[i];
+                    c[i] += 0.5*tempColor[i];
                 }
             }
         } // End intersect with triangle
@@ -1299,7 +1302,7 @@ function main() {
     //rayCastSpheres(context); 
     //rayCastTriangles(context);
     var numberSample = 20;
-    rayCastAll(context, numberSample, 0.5);
+    rayCastAll(context, numberSample, 1.0);
     
     //framelessRayCastSpheres(context);
 }
