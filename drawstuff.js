@@ -588,7 +588,7 @@ function isLightOccluded(L,isectPos,isectSphere,spheres) {
 } // end is light occluded
 
 // 
-function shadeIsectTriangle(isect, triangle, lights, spheres) {
+function shadeIsectTriangle(isect, triangle, lights, spheres, addAmbient) {
     try {
         if (!(isect instanceof Object) || !(triangle instanceof Triangle) 
             || !(lights instanceof Array)) {
@@ -646,7 +646,7 @@ function shadeIsectTriangle(isect, triangle, lights, spheres) {
 }
 
 // color the passed intersection and sphere
-function shadeIsect(isect,isectSphere,lights,spheres) {
+function shadeIsect(isect,isectSphere,lights,spheres, addAmbient) {
     try {
         if (   !(isect instanceof Object) || !(typeof(isectSphere) === "number") 
             || !(lights instanceof Array) || !(spheres instanceof Array))
@@ -753,7 +753,6 @@ function hitCheck(viewpoint, Dir, inputSpheres, triangles, inputLights, frontWal
                 if (isect.t < closestT) {
                     hitSphere = false;
                     closestT = isect.t;
-                    //c = shadeIsectTriangle(isect, triangles[t], inputLights, inputSpheres);
                     tempIsect = isect;
                     tempTriangle = triangles[t];
                 }
@@ -770,34 +769,36 @@ function hitCheck(viewpoint, Dir, inputSpheres, triangles, inputLights, frontWal
 
     }
     catch(e) {
-        console.log(e);
+        //console.log(e);
         return ({"isect": {"exists":false}, "hitSphere": false, "sphereIdx":-1, "triangle":null});
     }
 }
 
-function radiance(Dir, tempIsect, hitSphere, sphereIdx, tempTriangle, triangles, inputLights, inputSpheres, russian, numSample) {
+function radiance(Dir, tempIsect, hitSphere, sphereIdx, tempTriangle, triangles, inputLights, inputSpheres, russian, numSample, addAmbient) {
     try{
         if (russian >= 1.001) 
             throw "Russian roulette should be less than 1.";
         var c = new Color(0,0,0,0);
         if (hitSphere) {
             // Direct
-            c = shadeIsect(tempIsect, sphereIdx, inputLights, inputSpheres);
-            // Indirect
+            c = shadeIsect(tempIsect, sphereIdx, inputLights, inputSpheres, addAmbient);
+            // Russian roulette
             if (Math.random() < russian) {
                 var tempColor = new Color(0,0,0,0);
+                // Sampling
                 for (var s=0; s<numSample; ++s) {
                     // Find the intersection surface
                     var sphereCenter = new Vector(
                             inputSpheres[sphereIdx].x,
                             inputSpheres[sphereIdx].y,
                             inputSpheres[sphereIdx].z);
+                    // Finding orthogonal vector on intersection surface
                     var surface_n = Vector.normalize(
                             Vector.subtract(tempIsect.xyz, sphereCenter)); 
                     var surface_x = Vector.cross(Vector.normalize(Dir), surface_n);
                     var surface_y = Vector.cross(surface_x, surface_n);
 
-                    // Random sampling
+                    // Random sampling over hemisphere
                     var sample_dir = Vector.normalize(Vector.add3(
                             Vector.scale(Math.random(), surface_n),
                             Vector.scale(Math.random()*2 - 1, surface_x),
@@ -811,7 +812,7 @@ function radiance(Dir, tempIsect, hitSphere, sphereIdx, tempTriangle, triangles,
 
                     // Sampled color
                     var sample_c = newTracer(tempIsect.xyz, sample_dir, inputSpheres,
-                            triangles, inputLights, 0, true, 0);
+                            triangles, inputLights, 0.2, true, 1, true);
                     
                     for (var i=0; i<3; ++i) {
                         tempColor[i] += sample_factor*sample_c[i];
@@ -819,13 +820,14 @@ function radiance(Dir, tempIsect, hitSphere, sphereIdx, tempTriangle, triangles,
                 }
                 for (var i=0; i<3; ++i) {
                     tempColor[i] /= numSample;
-                    c[i] += 0.5*tempColor[i];
+                    c[i] = 0.8*c[i] + 0.7*tempColor[i];
                 }
             }
             return c;
         } // End intersect with sphere
         else {
-            c = shadeIsectTriangle(tempIsect, tempTriangle, inputLights, inputSpheres);
+            c = shadeIsectTriangle(tempIsect, tempTriangle, inputLights, inputSpheres, addAmbient);
+            // Russian Roulette
             if (Math.random() < russian) {
                 var tempColor = new Color(0,0,0,0);
                 for (var s=0; s<numSample; ++s) {
@@ -834,11 +836,11 @@ function radiance(Dir, tempIsect, hitSphere, sphereIdx, tempTriangle, triangles,
                     if (DirNormDot > 0) 
                         tempTriangle.n = Vector.scale(-1.0, tempTriangle.n);
 
-                    // Random sampling
+                    // Finding orthogonal vector on surface
                     var surface_x = Vector.cross(tempTriangle.n, Vector.normalize(Dir));
                     var surface_y = Vector.cross(tempTriangle.n, surface_x);
 
-                    // Random sampling
+                    // Random sampling over hemisphere
                     var sample_dir = Vector.normalize(Vector.add3(
                                 Vector.scale(Math.random(), tempTriangle.n),
                                 Vector.scale(Math.random()*2 - 1, surface_x),
@@ -849,7 +851,7 @@ function radiance(Dir, tempIsect, hitSphere, sphereIdx, tempTriangle, triangles,
                         throw "Random sampling direction fail triangle";
 
                     var sample_c = newTracer(tempIsect.xyz, sample_dir, inputSpheres,
-                            triangles, inputLights, 0, true, 0);
+                            triangles, inputLights, 0.2, true, 1, true);
 
                     for (var i=0; i<3; ++i) {
                         tempColor[i] += sample_c[i];
@@ -857,7 +859,7 @@ function radiance(Dir, tempIsect, hitSphere, sphereIdx, tempTriangle, triangles,
                 }
                 for (var i=0; i<3; ++i) {
                     tempColor[i] /= numSample;
-                    c[i] += 0.5*tempColor[i];
+                    c[i] = 0.8*c[i] + 0.7*tempColor[i];
                 }
             }
         } // End intersect with triangle
@@ -870,20 +872,22 @@ function radiance(Dir, tempIsect, hitSphere, sphereIdx, tempTriangle, triangles,
 }
 
 
-function newTracer(viewpoint, Dir, inputSpheres, triangles, inputLights, russian, frontWall, numSample) {
+function newTracer(viewpoint, Dir, inputSpheres, triangles, inputLights, russian, frontWall, numSample, addAmbient) {
     try {
         var hit = hitCheck(viewpoint, Dir, inputSpheres, triangles, inputLights, frontWall);
         //return ({"isect": tempIsect, "hitSphere": hitSphere, "sphereIdx":sphereIdx, "triangle":tempTriangle});
         if (!(hit.isect.exists)) // Not hit anything
             throw "new tracer not hit.";
         // Hit something
-        var color = radiance(Dir, hit.isect, hit.hitSphere, hit.sphereIdx, hit.triangle, triangles, inputLights, inputSpheres, russian, numSample);
+        var color = radiance(Dir, hit.isect, hit.hitSphere, hit.sphereIdx, 
+                hit.triangle, triangles, inputLights, inputSpheres, russian, 
+                numSample, addAmbient);
         return color;
     }
     catch(e) {
-        console.log(e);
+        //console.log(e);
         //return (new Color(255,255,255,255));
-        return (new Color(0,255,0,255));
+        return (new Color(90,90,90,255));
     }
 }
 
@@ -911,7 +915,6 @@ function tracer(viewpoint, Dir, inputSpheres, triangles, inputLights, recursive,
                 if (isect.t < closestT) { // it is the closest yet
                     hitSphere = true;
                     closestT = isect.t; // record closest t yet
-                    //c = shadeIsect(isect,s,inputLights,inputSpheres); 
                     tempIsect = isect;
                     sphereIdx = s;
                 } // end if closest yet
@@ -924,7 +927,6 @@ function tracer(viewpoint, Dir, inputSpheres, triangles, inputLights, recursive,
                 if (isect.t < closestT) {
                     hitSphere = false;
                     closestT = isect.t;
-                    //c = shadeIsectTriangle(isect, triangles[t], inputLights, inputSpheres);
                     tempIsect = isect;
                     tempTriangle = triangles[t];
                 }
@@ -941,7 +943,7 @@ function tracer(viewpoint, Dir, inputSpheres, triangles, inputLights, recursive,
         }
         else if (hitSphere) {
             // Find the color on the intersection
-            c = shadeIsect(tempIsect, sphereIdx, inputLights, inputSpheres);
+            c = shadeIsect(tempIsect, sphereIdx, inputLights, inputSpheres, true);
 
             if (recursive) {
                 var tempColor = new Color(0,0,0,0);
@@ -987,7 +989,7 @@ function tracer(viewpoint, Dir, inputSpheres, triangles, inputLights, recursive,
             }
         } // End intersect with sphere
         else {
-            c = shadeIsectTriangle(tempIsect, tempTriangle, inputLights, inputSpheres);
+            c = shadeIsectTriangle(tempIsect, tempTriangle, inputLights, inputSpheres, addAmbient);
             if (recursive) {
                 var tempColor = new Color(0,0,0,0);
                 for (var s=0; s<numSample; ++s) {
@@ -1114,7 +1116,7 @@ function rayCastTriangles(context) {
                         //console.log("intersect");
                         if (isect.t < closestT) {
                             closestT = isect.t;
-                            c = shadeIsectTriangle(isect, triangles[t], inputLights);
+                            c = shadeIsectTriangle(isect, triangles[t], inputLights, true);
                         }
                         break;
                     }
@@ -1164,7 +1166,7 @@ function rayCastSpheres(context) {
                     if (isect.exists) // there is an intersect
                         if (isect.t < closestT) { // it is the closest yet
                             closestT = isect.t; // record closest t yet
-                            c = shadeIsect(isect,s,inputLights,inputSpheres); 
+                            c = shadeIsect(isect,s,inputLights,inputSpheres, true); 
                         } // end if closest yet
                 } // end for spheres
                 drawPixel(imagedata,x,y,c);
@@ -1229,7 +1231,7 @@ function framelessRayCastSpheres(context) {
                     if (isect.exists) // there is an intersect
                         if (isect.t < closestT) { // it is the closest yet
                             closestT = isect.t; // record closest t yet
-                            c = shadeIsect(isect,s,inputLights,inputSpheres); 
+                            c = shadeIsect(isect,s,inputLights,inputSpheres, true); 
                         } // end if closest yet
                 } // end for spheres
                 imagedata.data[0] = c[0];
